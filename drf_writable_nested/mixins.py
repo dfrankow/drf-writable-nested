@@ -3,12 +3,16 @@ from collections import OrderedDict, defaultdict
 
 from django.contrib.contenttypes.fields import GenericRelation
 from django.contrib.contenttypes.models import ContentType
-from django.db.models import ProtectedError, FieldDoesNotExist
+from django.db import models
+from django.db.models import ProtectedError, FieldDoesNotExist, ObjectDoesNotExist
 from django.db.models.fields.related import ForeignObjectRel
 from django.utils.translation import ugettext_lazy as _
 from rest_framework import serializers
 from rest_framework.exceptions import ValidationError
-from rest_framework.validators import UniqueValidator
+from rest_framework.fields import empty
+from rest_framework.validators import UniqueValidator, UniqueTogetherValidator
+# permit writable nested serializers
+serializers.raise_errors_on_nested_writes = lambda a, b, c: None
 
 
 class BaseNestedModelSerializer(serializers.ModelSerializer):
@@ -404,3 +408,263 @@ class UniqueFieldsMixin(serializers.ModelSerializer):
     def update(self, instance, validated_data):
         self._validate_unique_fields(validated_data)
         return super(UniqueFieldsMixin, self).update(instance, validated_data)
+
+
+class RelatedSaveMixin(serializers.Serializer):
+
+    def to_internal_value(self, data):
+        self._fix_reverse_relations(data)
+        return super().to_internal_value(data)
+
+    def _fix_reverse_relations(self, data):
+        """For reverse relations, we must either (1) inject the PK of the provided instance or (2) make the reverse
+        field optional since we haven't saved the base object."""
+        for field_name, (field, related_field) in self._get_reverse_fields().items():
+            if data.get(field.source) is None:
+                continue
+            if self.instance:
+                # inject the PK from the instance
+                if isinstance(field, serializers.ListSerializer):
+                    for obj in data[field_name]:
+                        setattr(obj, related_field, self.instance.pk)
+                elif isinstance(field, serializers.ModelSerializer):
+                    setattr(data[field_name], related_field, self.instance.pk)
+            else:
+                print('fixing field {}'.format(field_name))
+                # make the reverse field optional (until we actually have a PK)
+                if isinstance(field, serializers.ListSerializer):
+                    field = field.child
+                if isinstance(field, serializers.ModelSerializer):
+                    # find the serializer field matching the reverse model relation
+                    for sub_field in field.fields.values():
+                        if sub_field.source == related_field.name:
+                            sub_field.required = False
+                            # found the matching field, move on
+                            break
+
+    def save(self, **kwargs):
+        """We already converted the inputs into a model so we need to save that model"""
+        # Create or update direct relations (foreign key, one-to-one)
+        self._extract_reverse_relations()
+        self._save_direct_relations()
+        super().save(**kwargs)
+        self._save_reverse_relations()
+
+    def _get_reverse_fields(self):
+        reverse_fields = OrderedDict()
+        for field_name, field in self.fields.items():
+            print('analyzing field {}'.format(field_name))
+            if field.read_only:
+                continue
+            try:
+                related_field, direct = self._get_related_field(field)
+            except FieldDoesNotExist:
+                print('does not exist')
+                continue
+            if direct:
+                print('is direct')
+                continue
+
+            reverse_fields[field_name] = (field, related_field)
+        return reverse_fields
+
+    def _get_related_field(self, field):
+        model_class = self.Meta.model
+
+        try:
+            related_field = model_class._meta.get_field(field.source)
+        except FieldDoesNotExist:
+            # If `related_name` is not set, field name does not include
+            # `_set` -> remove it and check again
+            default_postfix = '_set'
+            if field.source.endswith(default_postfix):
+                related_field = model_class._meta.get_field(
+                    field.source[:-len(default_postfix)])
+            else:
+                raise
+
+        if isinstance(related_field, ForeignObjectRel):
+            return related_field.field, False
+        return related_field, True
+
+    def _save_direct_relations(self):
+        """Save direct relations so related objects have FKs when committing the base instance"""
+        print("saving direct relations for {}".format(self.__class__.__name__))
+        for field_name, field in self.fields.items():
+            if field.read_only:
+                continue
+            if isinstance(self._validated_data, dict) and self._validated_data.get(field.source) is None:
+                continue
+            if isinstance(self._validated_data, models.Model) and getattr(self._validated_data, field.source) is None:
+                continue
+
+            try:
+                _, direct = self._get_related_field(field)
+            except FieldDoesNotExist:
+                continue
+            if not direct:
+                continue
+
+            field.save()
+
+    def _extract_reverse_relations(self):
+        """Removes revere relations from _validated_data to avoid FK integrity issues"""
+        # Remove related fields from validated data for future manipulations
+        for field_name, (field, related_field) in self._get_reverse_fields().items():
+            if self._validated_data.get(field.source) is None:
+                continue
+            source = field.source
+            if isinstance(field, serializers.ListSerializer):
+                field = field.child
+            if isinstance(field, serializers.ModelSerializer):
+                self._validated_data.pop(source)
+
+    def _save_reverse_relations(self):
+        # Remove related fields from validated data for future manipulations
+        for field_name, (field, related_field) in self._get_reverse_fields().items():
+            if self._validated_data.get(field.source) is None:
+                continue
+            origin = field
+            if isinstance(field, serializers.ListSerializer):
+                field = field.child
+            if isinstance(field, serializers.ModelSerializer):
+                origin.save()
+
+
+class GetOrCreateListSerializer(serializers.ListSerializer):
+    """Need a special save() method that cascades to the list of child instances"""
+    def save(self, **kwargs):
+        """
+        Save and return a list of object instances.
+        """
+        # Guard against incorrect use of `serializer.save(commit=False)`
+        assert 'commit' not in kwargs, (
+            "'commit' is not a valid keyword argument to the 'save()' method. "
+            "If you need to access data before committing to the database then "
+            "inspect 'serializer.validated_data' instead. "
+            "You can also pass additional keyword arguments to 'save()' if you "
+            "need to set extra attributes on the saved model instance. "
+            "For example: 'serializer.save(owner=request.user)'.'"
+        )
+
+        for item in self.validated_data:
+            # delegate save behavior to child serializer
+            self.child._validated_data = item
+            self.child.save()
+            delattr(self.child, '_validated_data')
+
+        return self.validated_data
+
+    def run_validation(self, data=empty):
+        """Since a nested serializer is treated like a Field, `is_valid` will not be called so we need to set
+        _validated_data in the mixin."""
+        self._validated_data = super().run_validation(data)
+        return self._validated_data
+
+
+class GetOrCreateNestedSerializerMixin(serializers.Serializer):
+    """Transcodes a raw data stream into a Model instance, using get-or-create logic."""
+    default_list_serializer = GetOrCreateListSerializer
+    DEFAULT_MATCH_ON = ['pk']
+    queryset = None
+
+    def __init__(self, *args, **kwargs):
+        self.queryset = kwargs.pop('queryset', self.queryset)
+        if self.queryset is None and hasattr(self, 'Meta') and hasattr(self.Meta, 'model'):
+            self.queryset = self.Meta.model.objects.all()
+        assert self.queryset is not None, \
+            "GetOrCreateMixin requires a `queryset` on the Field or a `queryset` kwarg"
+        self.match_on = kwargs.pop('match_on', self.DEFAULT_MATCH_ON)
+        assert self.match_on == '__all__' or isinstance(self.match_on, (list, set)), \
+            "match_on only accepts as Collection of strings or the special value __all__"
+        if isinstance(self.match_on, (list, set)):
+            for match in self.match_on:
+                assert isinstance(match, str), "match_on collection can only contain strings"
+        super(GetOrCreateNestedSerializerMixin, self).__init__(*args, **kwargs)
+
+    def run_validation(self, data=empty):
+        """Since a nested serializer is treated like a Field, `is_valid` will not be called."""
+        # ensure Unique and UniqueTogether don't collide with a DB match
+        validators = self.remove_validation_unique()
+        self._validated_data = super().run_validation(data)
+        # restore Unique or UniqueTogether
+        self.restore_validation_unique(validators)
+        return self._validated_data
+
+    def to_internal_value(self, data):
+        """Match an existing instance if it is exactly the same (on all provided fields) or create a new one"""
+        if data is None:
+            return None
+        try:
+            # super should handle data issues created by options like `source`
+            data = super(GetOrCreateNestedSerializerMixin, self).to_internal_value(data)
+            match_on = {k: v for k, v in data.items() if self.match_on == '__all__' or k in self.match_on}
+            match = self.queryset.get(**match_on)
+            for k, v in data.items():
+                setattr(match, k, v)
+            return match
+        except ObjectDoesNotExist:
+            return self.queryset.model(**data)
+        except (TypeError, ValueError):
+            self.fail('incorrect_type', data_type=type(data).__name__)
+
+    def save(self, **kwargs):
+        # The Model instance is stored in _validated_data
+        # Update the model based on overrides in kwargs
+        for k, v in kwargs.items():
+            setattr(self._validated_data, k, v)
+
+        print("saving:  {}".format(self._validated_data.__dict__))
+        self._validated_data.save()
+
+        return self._validated_data
+
+    @classmethod
+    def many_init(cls, *args, **kwargs):
+        # inject the default into list_serializer_class (if not present)
+        meta = getattr(cls, 'Meta', None)
+        if meta is None:
+            class Meta:
+                pass
+            meta = Meta
+            setattr(cls, 'Meta', meta)
+        list_serializer_class = getattr(meta, 'list_serializer_class', None)
+        if list_serializer_class is None:
+            setattr(meta, 'list_serializer_class', cls.default_list_serializer)
+        assert issubclass(meta.list_serializer_class, GetOrCreateListSerializer), \
+            "ChildNestedSerializerMixin expects a GetOrCreateListSerializer for correct save behavior.  Please override " \
+            "Meta.list_serializer_class and provide an appropriate class."
+        return super(GetOrCreateNestedSerializerMixin, cls).many_init(*args, **kwargs)
+
+    def remove_validation_unique(self):
+        """
+        Removes unique validators from a serializers.  This is critical for get-or-create style serialization.  It can also
+        be used to distinguish 409 errors from client-side validation errors.
+        """
+        fields = {}
+        # extract unique validators
+        for name, field in self.fields.items():
+            fields[name] = []
+            assert hasattr(field, 'validators'), "no validators on {}".format(field.__class__.__name__)
+            for validator in field.validators:
+                if isinstance(validator, UniqueValidator):
+                    fields[name].append(validator)
+            for validator in fields[name]:
+                field.validators.remove(validator)
+        # extract unique_together validators
+        fields['_'] = []
+        for validator in self.validators:
+            if isinstance(validator, UniqueTogetherValidator):
+                fields['_'].append(validator)
+        for validator in fields['_']:
+            self.validators.remove(validator)
+        return fields
+
+    def restore_validation_unique(self, unique_validators):
+        together_validators = unique_validators.pop('_')
+        for serializer in together_validators:
+            self.validators.append(serializer)
+        fields = self.fields.items()
+        for name, validators in unique_validators.items():
+            for validator in validators:
+                fields['name'].validators.append(validator)
