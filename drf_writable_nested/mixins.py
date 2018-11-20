@@ -430,7 +430,6 @@ class RelatedSaveMixin(serializers.Serializer):
                 elif isinstance(field, serializers.ModelSerializer):
                     setattr(data[field_name], related_field, self.instance.pk)
             else:
-                print('fixing field {}'.format(field_name))
                 # make the reverse field optional (until we actually have a PK)
                 if isinstance(field, serializers.ListSerializer):
                     field = field.child
@@ -453,16 +452,13 @@ class RelatedSaveMixin(serializers.Serializer):
     def _get_reverse_fields(self):
         reverse_fields = OrderedDict()
         for field_name, field in self.fields.items():
-            print('analyzing field {}'.format(field_name))
             if field.read_only:
                 continue
             try:
                 related_field, direct = self._get_related_field(field)
             except FieldDoesNotExist:
-                print('does not exist')
                 continue
             if direct:
-                print('is direct')
                 continue
 
             reverse_fields[field_name] = (field, related_field)
@@ -505,7 +501,13 @@ class RelatedSaveMixin(serializers.Serializer):
             if not direct:
                 continue
 
+            print("saving field:  {}".format(field))
             field.save()
+            # even though the PK on the related object is created during save(), <related>_id is not updated on a
+            # parent object unless we reassign it
+            if isinstance(self._validated_data, models.Model):
+                setattr(self._validated_data, field_name, getattr(self._validated_data, field_name))
+            print("saved field:  {}".format(field))
 
     def _extract_reverse_relations(self):
         """Removes revere relations from _validated_data to avoid FK integrity issues"""
@@ -614,8 +616,9 @@ class GetOrCreateNestedSerializerMixin(serializers.Serializer):
         for k, v in kwargs.items():
             setattr(self._validated_data, k, v)
 
-        print("saving:  {}".format(self._validated_data.__dict__))
+        print("saving _validated_data:  {}".format(self._validated_data.__dict__))
         self._validated_data.save()
+        print("saved _validated_data:  {}".format(self._validated_data.__dict__))
 
         return self._validated_data
 
