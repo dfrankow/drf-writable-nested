@@ -593,23 +593,6 @@ class GetOrCreateNestedSerializerMixin(serializers.Serializer):
         self.restore_validation_unique(validators)
         return self._validated_data
 
-    def to_internal_value(self, data):
-        """Match an existing instance if it is exactly the same (on all provided fields) or create a new one"""
-        if data is None:
-            return None
-        try:
-            # super should handle data issues created by options like `source`
-            data = super(GetOrCreateNestedSerializerMixin, self).to_internal_value(data)
-            match_on = {k: v for k, v in data.items() if self.match_on == '__all__' or k in self.match_on}
-            match = self.queryset.get(**match_on)
-            for k, v in data.items():
-                setattr(match, k, v)
-            return match
-        except ObjectDoesNotExist:
-            return self.queryset.model(**data)
-        except (TypeError, ValueError):
-            self.fail('incorrect_type', data_type=type(data).__name__)
-
     def save(self, **kwargs):
         # The Model instance is stored in _validated_data
         # Update the model based on overrides in kwargs
@@ -617,10 +600,16 @@ class GetOrCreateNestedSerializerMixin(serializers.Serializer):
             setattr(self._validated_data, k, v)
 
         print("saving _validated_data:  {}".format(self._validated_data.__dict__))
-        self._validated_data.save()
-        print("saved _validated_data:  {}".format(self._validated_data.__dict__))
-
-        return self._validated_data
+        try:
+            match_on = {k: v for k, v in self._validated_data.items() if self.match_on == '__all__' or k in self.match_on}
+            match = self.queryset.get(**match_on)
+            for k, v in self._validated_data.items():
+                setattr(match, k, v)
+            return match
+        except ObjectDoesNotExist:
+            return self.queryset.model(**self._validated_data)
+        except (TypeError, ValueError):
+            self.fail('incorrect_type', data_type=type(self._validated_data).__name__)
 
     @classmethod
     def many_init(cls, *args, **kwargs):
