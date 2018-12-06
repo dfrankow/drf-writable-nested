@@ -155,7 +155,7 @@ class GrandParent(models.Model):
     child = models.ForeignKey(Parent, on_delete=models.CASCADE)
 
 
-class NestedParentSerializer(mixins.RelatedSaveMixin, mixins.GetOrCreateNestedSerializerMixin, serializers.ModelSerializer):
+class NestedParentSerializer(mixins.GetOrCreateNestedSerializerMixin, serializers.ModelSerializer):
     class Meta:
         model = Parent
         fields = '__all__'

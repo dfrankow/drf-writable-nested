@@ -493,6 +493,8 @@ class RelatedSaveMixin(serializers.Serializer):
                 continue
             if isinstance(self._validated_data, models.Model) and getattr(self._validated_data, field.source) is None:
                 continue
+            if not isinstance(field, serializers.BaseSerializer):
+                continue
 
             try:
                 _, direct = self._get_related_field(field)
@@ -502,11 +504,7 @@ class RelatedSaveMixin(serializers.Serializer):
                 continue
 
             print("saving field:  {}".format(field))
-            field.save()
-            # even though the PK on the related object is created during save(), <related>_id is not updated on a
-            # parent object unless we reassign it
-            if isinstance(self._validated_data, models.Model):
-                setattr(self._validated_data, field_name, getattr(self._validated_data, field_name))
+            self._validated_data[field_name] = field.save()
             print("saved field:  {}".format(field))
 
     def _extract_reverse_relations(self):
@@ -549,13 +547,15 @@ class GetOrCreateListSerializer(serializers.ListSerializer):
             "For example: 'serializer.save(owner=request.user)'.'"
         )
 
+        new_values = []
+
         for item in self.validated_data:
             # delegate save behavior to child serializer
             self.child._validated_data = item
-            self.child.save()
+            new_values.append(self.child.save())
             delattr(self.child, '_validated_data')
 
-        return self.validated_data
+        return new_values
 
     def run_validation(self, data=empty):
         """Since a nested serializer is treated like a Field, `is_valid` will not be called so we need to set
@@ -564,7 +564,7 @@ class GetOrCreateListSerializer(serializers.ListSerializer):
         return self._validated_data
 
 
-class GetOrCreateNestedSerializerMixin(serializers.Serializer):
+class GetOrCreateNestedSerializerMixin(RelatedSaveMixin):
     """Transcodes a raw data stream into a Model instance, using get-or-create logic."""
     default_list_serializer = GetOrCreateListSerializer
     DEFAULT_MATCH_ON = ['pk']
@@ -592,24 +592,6 @@ class GetOrCreateNestedSerializerMixin(serializers.Serializer):
         # restore Unique or UniqueTogether
         self.restore_validation_unique(validators)
         return self._validated_data
-
-    def save(self, **kwargs):
-        # The Model instance is stored in _validated_data
-        # Update the model based on overrides in kwargs
-        for k, v in kwargs.items():
-            setattr(self._validated_data, k, v)
-
-        print("saving _validated_data:  {}".format(self._validated_data.__dict__))
-        try:
-            match_on = {k: v for k, v in self._validated_data.items() if self.match_on == '__all__' or k in self.match_on}
-            match = self.queryset.get(**match_on)
-            for k, v in self._validated_data.items():
-                setattr(match, k, v)
-            return match
-        except ObjectDoesNotExist:
-            return self.queryset.model(**self._validated_data)
-        except (TypeError, ValueError):
-            self.fail('incorrect_type', data_type=type(self._validated_data).__name__)
 
     @classmethod
     def many_init(cls, *args, **kwargs):
@@ -660,3 +642,28 @@ class GetOrCreateNestedSerializerMixin(serializers.Serializer):
         for name, validators in unique_validators.items():
             for validator in validators:
                 fields['name'].validators.append(validator)
+
+    def save(self, **kwargs):
+        """We already converted the inputs into a model so we need to save that model"""
+        # The Model instance is stored in _validated_data
+        # Update the model based on overrides in kwargs
+        for k, v in kwargs.items():
+            setattr(self._validated_data, k, v)
+        # Create or update direct relations (foreign key, one-to-one)
+        self._extract_reverse_relations()
+        self._save_direct_relations()
+
+        print("saving _validated_data:  {}".format(self._validated_data.__dict__))
+        try:
+            match_on = {k: v for k, v in self._validated_data.items() if self.match_on == '__all__' or k in self.match_on}
+            match = self.queryset.get(**match_on)
+            for k, v in self._validated_data.items():
+                setattr(match, k, v)
+        except ObjectDoesNotExist:
+            match = self.queryset.model(**self._validated_data)
+        except (TypeError, ValueError):
+            self.fail('incorrect_type', data_type=type(self._validated_data).__name__)
+
+        match.save()
+        self._save_reverse_relations()
+        return match
