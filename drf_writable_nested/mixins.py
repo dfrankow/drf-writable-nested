@@ -485,7 +485,6 @@ class RelatedSaveMixin(serializers.Serializer):
 
     def _save_direct_relations(self):
         """Save direct relations so related objects have FKs when committing the base instance"""
-        print("saving direct relations for {}".format(self.__class__.__name__))
         for field_name, field in self.fields.items():
             if field.read_only:
                 continue
@@ -503,9 +502,7 @@ class RelatedSaveMixin(serializers.Serializer):
             if not direct:
                 continue
 
-            print("saving field:  {}".format(field))
             self._validated_data[field_name] = field.save()
-            print("saved field:  {}".format(field))
 
     def _extract_reverse_relations(self):
         """Removes revere relations from _validated_data to avoid FK integrity issues"""
@@ -653,7 +650,6 @@ class GetOrCreateNestedSerializerMixin(RelatedSaveMixin):
         self._extract_reverse_relations()
         self._save_direct_relations()
 
-        print("saving _validated_data:  {}".format(self._validated_data.__dict__))
         try:
             match_on = {k: v for k, v in self._validated_data.items() if self.match_on == '__all__' or k in self.match_on}
             match = self.queryset.get(**match_on)
