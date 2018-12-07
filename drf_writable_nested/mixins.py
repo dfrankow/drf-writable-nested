@@ -642,10 +642,9 @@ class GetOrCreateNestedSerializerMixin(RelatedSaveMixin):
 
     def save(self, **kwargs):
         """We already converted the inputs into a model so we need to save that model"""
-        # The Model instance is stored in _validated_data
-        # Update the model based on overrides in kwargs
         for k, v in kwargs.items():
             setattr(self._validated_data, k, v)
+
         # Create or update direct relations (foreign key, one-to-one)
         self._extract_reverse_relations()
         self._save_direct_relations()
