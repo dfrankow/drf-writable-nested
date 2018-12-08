@@ -5,25 +5,39 @@ from rest_framework import serializers
 from drf_writable_nested import mixins
 
 
-##################
-# Direct Relation
-##################
+#####################
+# Generic Serializer
+#####################
 class Child(models.Model):
     name = models.TextField()
-
-
-class Parent(models.Model):
-    child = models.ForeignKey(Child, on_delete=models.CASCADE)
-
-
-class ParentMany(models.Model):
-    children = models.ManyToManyField(Child)
 
 
 class ChildSerializer(mixins.GetOrCreateNestedSerializerMixin, serializers.ModelSerializer):
     class Meta:
         model = Child
         fields = '__all__'
+
+
+class GenericParentSerializer(mixins.RelatedSaveMixin, serializers.Serializer):
+    class Meta:
+        fields = '__all__'
+    # source of a 1:many relationship
+    child = ChildSerializer()
+
+    def save(self):
+        # "container only", no create logic
+        pass
+
+
+##################
+# Direct Relation
+##################
+class Parent(models.Model):
+    child = models.ForeignKey(Child, on_delete=models.CASCADE)
+
+
+class ParentMany(models.Model):
+    children = models.ManyToManyField(Child)
 
 
 class ParentSerializer(mixins.RelatedSaveMixin, serializers.ModelSerializer):
@@ -87,6 +101,21 @@ class ReverseManyParentSerializer(mixins.RelatedSaveMixin, serializers.ModelSeri
 
 class WritableNestedModelSerializerTest(TestCase):
 
+    def test_generic_nested_create(self):
+        data = {
+            "child": {
+                "name": "test",
+            }
+        }
+
+        serializer = GenericParentSerializer(data=data)
+        valid = serializer.is_valid()
+        self.assertTrue(
+            valid,
+            "Serializer should have been valid:  {}".format(serializer.errors)
+        )
+        serializer.save()
+
     def test_direct_nested_create(self):
         data = {
             "child": {
@@ -148,9 +177,9 @@ class WritableNestedModelSerializerTest(TestCase):
         serializer.save()
 
 
-##################
-# Direct Relation
-##################
+###################
+# 3-Layer Relation
+###################
 class GrandParent(models.Model):
     child = models.ForeignKey(Parent, on_delete=models.CASCADE)
 

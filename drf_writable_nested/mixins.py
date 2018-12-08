@@ -413,10 +413,10 @@ class UniqueFieldsMixin(serializers.ModelSerializer):
 class RelatedSaveMixin(serializers.Serializer):
 
     def to_internal_value(self, data):
-        self._fix_reverse_relations(data)
+        self._make_reverse_relations_valid(data)
         return super().to_internal_value(data)
 
-    def _fix_reverse_relations(self, data):
+    def _make_reverse_relations_valid(self, data):
         """For reverse relations, we must either (1) inject the PK of the provided instance or (2) make the reverse
         field optional since we haven't saved the base object."""
         for field_name, (field, related_field) in self._get_reverse_fields().items():
@@ -451,6 +451,9 @@ class RelatedSaveMixin(serializers.Serializer):
 
     def _get_reverse_fields(self):
         reverse_fields = OrderedDict()
+        if not hasattr(self, 'Meta') or not hasattr(self.Meta, 'model'):
+            # No model means no reverse fields (without the need to iterate)
+            return reverse_fields
         for field_name, field in self.fields.items():
             if field.read_only:
                 continue
@@ -466,7 +469,6 @@ class RelatedSaveMixin(serializers.Serializer):
 
     def _get_related_field(self, field):
         model_class = self.Meta.model
-
         try:
             related_field = model_class._meta.get_field(field.source)
         except FieldDoesNotExist:
@@ -490,17 +492,16 @@ class RelatedSaveMixin(serializers.Serializer):
                 continue
             if isinstance(self._validated_data, dict) and self._validated_data.get(field.source) is None:
                 continue
-            if isinstance(self._validated_data, models.Model) and getattr(self._validated_data, field.source) is None:
-                continue
             if not isinstance(field, serializers.BaseSerializer):
                 continue
-
-            try:
-                _, direct = self._get_related_field(field)
-            except FieldDoesNotExist:
-                continue
-            if not direct:
-                continue
+            if hasattr(self, 'Meta') and hasattr(self.Meta, 'model'):
+                # ModelSerializer (or similar) so it makes sense to distinguish direct/reverse relations
+                try:
+                    _, direct = self._get_related_field(field)
+                except FieldDoesNotExist:
+                    continue
+                if not direct:
+                    continue
 
             self._validated_data[field_name] = field.save()
 
