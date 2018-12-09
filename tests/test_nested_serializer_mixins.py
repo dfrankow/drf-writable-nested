@@ -1,3 +1,7 @@
+from unittest import mock
+
+from django.conf import settings
+from django.contrib.auth import get_user_model
 from django.db import models
 from django.test import TestCase
 from rest_framework import serializers
@@ -24,9 +28,9 @@ class GenericParentSerializer(mixins.RelatedSaveMixin, serializers.Serializer):
     # source of a 1:many relationship
     child = ChildSerializer()
 
-    def save(self):
+    def create(self, validated_data):
         # "container only", no create logic
-        pass
+        return validated_data
 
 
 ##################
@@ -233,3 +237,64 @@ class NestedWritableNestedModelSerializerTest(TestCase):
             1,
             Child.objects.count(),
         )
+
+
+#####################
+# Context Conduction
+#####################
+class ContextChild(models.Model):
+    name = models.TextField()
+    owner = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
+
+
+class ContextChildSerializer(mixins.GetOrCreateNestedSerializerMixin, serializers.ModelSerializer):
+    class Meta:
+        model = ContextChild
+        fields = '__all__'
+        extra_kwargs = {
+            'owner': {
+                'default': serializers.CurrentUserDefault(),
+            }
+        }
+
+
+class GenericContextParentSerializer(mixins.RelatedSaveMixin):
+    child = ContextChildSerializer()
+
+    def create(self, validated_data):
+        # "container only", no create logic
+        return validated_data
+
+
+class GenericContextGrandParentSerializer(mixins.RelatedSaveMixin):
+    child = GenericContextParentSerializer()
+
+    def create(self, validated_data):
+        # "container only", no create logic
+        return validated_data
+
+
+class ContextConductionTest(TestCase):
+
+    def setUp(self):
+        self.user = get_user_model().objects.create(username="test_user")
+
+    def test_context_conduction(self):
+        data = {
+            "child": {
+                "child": {
+                    "name": "test",
+                }
+            }
+        }
+
+        serializer = GenericContextGrandParentSerializer(data=data)
+        serializer._context = {
+            'request': mock.Mock(user=self.user)
+        }
+        valid = serializer.is_valid()
+        self.assertTrue(
+            valid,
+            "Serializer should have been valid:  {}".format(serializer.errors)
+        )
+        serializer.save()

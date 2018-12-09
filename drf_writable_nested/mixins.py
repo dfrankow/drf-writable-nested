@@ -442,6 +442,7 @@ class RelatedSaveMixin(serializers.Serializer):
 
     def run_validation(self, data=empty):
         self._validated_data = super().run_validation(data)
+        self._errors = {}
         return self._validated_data
 
     def save(self, **kwargs):
