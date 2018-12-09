@@ -3,7 +3,6 @@ from collections import OrderedDict, defaultdict
 
 from django.contrib.contenttypes.fields import GenericRelation
 from django.contrib.contenttypes.models import ContentType
-from django.db import models
 from django.db.models import ProtectedError, FieldDoesNotExist, ObjectDoesNotExist
 from django.db.models.fields.related import ForeignObjectRel
 from django.utils.translation import ugettext_lazy as _
@@ -499,7 +498,7 @@ class RelatedSaveMixin(serializers.Serializer):
             if not isinstance(field, serializers.BaseSerializer):
                 continue
             if hasattr(self, 'Meta') and hasattr(self.Meta, 'model'):
-                # ModelSerializer (or similar) so it makes sense to distinguish direct/reverse relations
+                # ModelSerializer (or similar) so we need to exclude reverse relations
                 try:
                     _, direct = self._get_related_field(field)
                 except FieldDoesNotExist:
@@ -572,6 +571,23 @@ class GetOrCreateNestedSerializerMixin(RelatedSaveMixin):
     DEFAULT_MATCH_ON = ['pk']
     queryset = None
 
+    @classmethod
+    def many_init(cls, *args, **kwargs):
+        # inject the default into list_serializer_class (if not present)
+        meta = getattr(cls, 'Meta', None)
+        if meta is None:
+            class Meta:
+                pass
+            meta = Meta
+            setattr(cls, 'Meta', meta)
+        list_serializer_class = getattr(meta, 'list_serializer_class', None)
+        if list_serializer_class is None:
+            setattr(meta, 'list_serializer_class', cls.default_list_serializer)
+        assert issubclass(meta.list_serializer_class, GetOrCreateListSerializer), \
+            "ChildNestedSerializerMixin expects a GetOrCreateListSerializer for correct save behavior.  Please override " \
+            "Meta.list_serializer_class and provide an appropriate class."
+        return super(GetOrCreateNestedSerializerMixin, cls).many_init(*args, **kwargs)
+
     def __init__(self, *args, **kwargs):
         self.queryset = kwargs.pop('queryset', self.queryset)
         if self.queryset is None and hasattr(self, 'Meta') and hasattr(self.Meta, 'model'):
@@ -594,23 +610,6 @@ class GetOrCreateNestedSerializerMixin(RelatedSaveMixin):
         # restore Unique or UniqueTogether
         self.restore_validation_unique(validators)
         return self._validated_data
-
-    @classmethod
-    def many_init(cls, *args, **kwargs):
-        # inject the default into list_serializer_class (if not present)
-        meta = getattr(cls, 'Meta', None)
-        if meta is None:
-            class Meta:
-                pass
-            meta = Meta
-            setattr(cls, 'Meta', meta)
-        list_serializer_class = getattr(meta, 'list_serializer_class', None)
-        if list_serializer_class is None:
-            setattr(meta, 'list_serializer_class', cls.default_list_serializer)
-        assert issubclass(meta.list_serializer_class, GetOrCreateListSerializer), \
-            "ChildNestedSerializerMixin expects a GetOrCreateListSerializer for correct save behavior.  Please override " \
-            "Meta.list_serializer_class and provide an appropriate class."
-        return super(GetOrCreateNestedSerializerMixin, cls).many_init(*args, **kwargs)
 
     def remove_validation_unique(self):
         """
