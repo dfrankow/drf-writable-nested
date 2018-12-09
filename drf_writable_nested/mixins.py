@@ -441,6 +441,10 @@ class RelatedSaveMixin(serializers.Serializer):
                             # found the matching field, move on
                             break
 
+    def run_validation(self, data=empty):
+        self._validated_data = super().run_validation(data)
+        return self._validated_data
+
     def save(self, **kwargs):
         """We already converted the inputs into a model so we need to save that model"""
         # Create or update direct relations (foreign key, one-to-one)
