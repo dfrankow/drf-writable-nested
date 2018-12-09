@@ -658,7 +658,7 @@ class GetOrCreateNestedSerializerMixin(RelatedSaveMixin):
             match_on = {}
             for field_name, field in self.get_fields().items():
                 if self.match_on == '__all__' or field_name in self.match_on:
-                    match_on[field.source] = self._validated_data[field_name]
+                    match_on[field.source or field_name] = self._validated_data[field_name]
             match = self.queryset.get(**match_on)
             for k, v in self._validated_data.items():
                 setattr(match, k, v)
