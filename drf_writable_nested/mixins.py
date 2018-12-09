@@ -506,7 +506,6 @@ class RelatedSaveMixin(serializers.Serializer):
                 if not direct:
                     continue
 
-            field._context = self.context
             self._validated_data[field_name] = field.save()
 
     def _extract_reverse_relations(self):
@@ -530,7 +529,6 @@ class RelatedSaveMixin(serializers.Serializer):
             if isinstance(field, serializers.ListSerializer):
                 field = field.child
             if isinstance(field, serializers.ModelSerializer):
-                origin._context = self.context
                 origin.save()
 
 
@@ -552,7 +550,6 @@ class GetOrCreateListSerializer(serializers.ListSerializer):
 
         new_values = []
 
-        self.child._context = self.context
         for item in self.validated_data:
             # delegate save behavior to child serializer
             self.child._validated_data = item
