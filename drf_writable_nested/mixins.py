@@ -506,6 +506,7 @@ class RelatedSaveMixin(serializers.Serializer):
                 if not direct:
                     continue
 
+            field._context = self.context
             self._validated_data[field_name] = field.save()
 
     def _extract_reverse_relations(self):
@@ -529,6 +530,7 @@ class RelatedSaveMixin(serializers.Serializer):
             if isinstance(field, serializers.ListSerializer):
                 field = field.child
             if isinstance(field, serializers.ModelSerializer):
+                origin._context = self.context
                 origin.save()
 
 
@@ -550,6 +552,7 @@ class GetOrCreateListSerializer(serializers.ListSerializer):
 
         new_values = []
 
+        self.child._context = self.context
         for item in self.validated_data:
             # delegate save behavior to child serializer
             self.child._validated_data = item
@@ -603,7 +606,7 @@ class GetOrCreateNestedSerializerMixin(RelatedSaveMixin):
         super(GetOrCreateNestedSerializerMixin, self).__init__(*args, **kwargs)
 
     def run_validation(self, data=empty):
-        """Since a nested serializer is treated like a Field, `is_valid` will not be called."""
+        """A nested serializer is treated like a Field so `is_valid` will not be called and `_validated_data` not set."""
         # ensure Unique and UniqueTogether don't collide with a DB match
         validators = self.remove_validation_unique()
         self._validated_data = super().run_validation(data)
@@ -653,6 +656,7 @@ class GetOrCreateNestedSerializerMixin(RelatedSaveMixin):
         self._extract_reverse_relations()
         self._save_direct_relations()
 
+        # TODO: move to a specialized class (easier to subclass)
         try:
             match_on = {}
             for field_name, field in self.get_fields().items():
@@ -665,7 +669,7 @@ class GetOrCreateNestedSerializerMixin(RelatedSaveMixin):
             match = self.queryset.model(**self._validated_data)
         except (TypeError, ValueError):
             self.fail('incorrect_type', data_type=type(self._validated_data).__name__)
-
         match.save()
+
         self._save_reverse_relations()
         return match
