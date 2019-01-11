@@ -554,7 +554,7 @@ class GetOrCreateListSerializer(serializers.ListSerializer):
         for item in self.validated_data:
             # delegate save behavior to child serializer
             self.child._validated_data = item
-            new_values.append(self.child.save())
+            new_values.append(self.child.save(**kwargs))
             delattr(self.child, '_validated_data')
 
         return new_values
