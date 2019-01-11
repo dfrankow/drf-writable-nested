@@ -648,7 +648,7 @@ class GetOrCreateNestedSerializerMixin(RelatedSaveMixin):
     def save(self, **kwargs):
         """We already converted the inputs into a model so we need to save that model"""
         for k, v in kwargs.items():
-            setattr(self._validated_data, k, v)
+            self._validated_data[k] = v
 
         # Create or update direct relations (foreign key, one-to-one)
         self._extract_reverse_relations()
