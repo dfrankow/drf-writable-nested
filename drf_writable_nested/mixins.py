@@ -522,9 +522,9 @@ class RelatedSaveMixin(serializers.Serializer):
             # inject the PK from the instance
             if isinstance(field, serializers.ListSerializer):
                 for obj in data:
-                    obj[related_field.name] = self.instance.pk
+                    obj[related_field.name] = self.instance
             elif isinstance(field, serializers.ModelSerializer):
-                data[related_field.name] = self.instance.pk
+                data[related_field.name] = self.instance
             else:
                 raise Exception("unexpected serializer type")
             field.save()
