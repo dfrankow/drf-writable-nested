@@ -421,26 +421,16 @@ class RelatedSaveMixin(serializers.Serializer):
         for field_name, (field, related_field) in self._get_reverse_fields().items():
             if data.get(field.source) is None:
                 continue
-            if self.instance:
-                # inject the PK from the instance
-                if isinstance(field, serializers.ListSerializer):
-                    for obj in data[field_name]:
-                        obj[related_field.name] = self.instance.pk
-                elif isinstance(field, serializers.ModelSerializer):
-                    data[field_name][related_field.name] = self.instance.pk
-                else:
-                    raise Exception("unexpected serializer type")
-            else:
-                # make the reverse field optional (until we actually have a PK)
-                if isinstance(field, serializers.ListSerializer):
-                    field = field.child
-                if isinstance(field, serializers.ModelSerializer):
-                    # find the serializer field matching the reverse model relation
-                    for sub_field in field.fields.values():
-                        if sub_field.source == related_field.name:
-                            sub_field.required = False
-                            # found the matching field, move on
-                            break
+            # make the reverse field optional (until we actually have a PK)
+            if isinstance(field, serializers.ListSerializer):
+                field = field.child
+            if isinstance(field, serializers.ModelSerializer):
+                # find the serializer field matching the reverse model relation
+                for sub_field in field.fields.values():
+                    if sub_field.source == related_field.name:
+                        sub_field.required = False
+                        # found the matching field, move on
+                        break
 
     def run_validation(self, data=empty):
         self._validated_data = super().run_validation(data)
@@ -452,9 +442,9 @@ class RelatedSaveMixin(serializers.Serializer):
         # Create or update direct relations (foreign key, one-to-one)
         reverse_relations = self._extract_reverse_relations()
         self._save_direct_relations()
-        response = super().save(**kwargs)
+        super().save(**kwargs)
         self._save_reverse_relations(reverse_relations)
-        return response
+        return self.instance
 
     def _get_reverse_fields(self):
         reverse_fields = OrderedDict()
@@ -523,13 +513,21 @@ class RelatedSaveMixin(serializers.Serializer):
             if isinstance(field, serializers.ListSerializer):
                 field = field.child
             if isinstance(field, serializers.ModelSerializer):
-                related_objects.append(self._validated_data.pop(source))
+                related_objects.append((field, related_field, self._validated_data.pop(source)))
         return related_objects
 
     def _save_reverse_relations(self, related_objects):
         # Remove related fields from validated data for future manipulations
-        for related in related_objects:
-            related.save()
+        for field, related_field, data in related_objects:
+            # inject the PK from the instance
+            if isinstance(field, serializers.ListSerializer):
+                for obj in data:
+                    obj[related_field.name] = self.instance.pk
+            elif isinstance(field, serializers.ModelSerializer):
+                data[related_field.name] = self.instance.pk
+            else:
+                raise Exception("unexpected serializer type")
+            field.save()
 
 
 class GetOrCreateListSerializer(serializers.ListSerializer):
@@ -650,7 +648,7 @@ class GetOrCreateNestedSerializerMixin(RelatedSaveMixin):
             self._validated_data[k] = v
 
         # Create or update direct relations (foreign key, one-to-one)
-        self._extract_reverse_relations()
+        related_objects = self._extract_reverse_relations()
         self._save_direct_relations()
 
         # TODO: move to a specialized class (easier to subclass)
@@ -668,5 +666,5 @@ class GetOrCreateNestedSerializerMixin(RelatedSaveMixin):
             self.fail('incorrect_type', data_type=type(self._validated_data).__name__)
         match.save()
 
-        self._save_reverse_relations()
+        self._save_reverse_relations(related_objects)
         return match
