@@ -450,10 +450,11 @@ class RelatedSaveMixin(serializers.Serializer):
     def save(self, **kwargs):
         """We already converted the inputs into a model so we need to save that model"""
         # Create or update direct relations (foreign key, one-to-one)
-        self._extract_reverse_relations()
+        reverse_relations = self._extract_reverse_relations()
         self._save_direct_relations()
-        super().save(**kwargs)
-        self._save_reverse_relations()
+        response = super().save(**kwargs)
+        self._save_reverse_relations(reverse_relations)
+        return response
 
     def _get_reverse_fields(self):
         reverse_fields = OrderedDict()
@@ -514,6 +515,7 @@ class RelatedSaveMixin(serializers.Serializer):
     def _extract_reverse_relations(self):
         """Removes revere relations from _validated_data to avoid FK integrity issues"""
         # Remove related fields from validated data for future manipulations
+        related_objects = []
         for field_name, (field, related_field) in self._get_reverse_fields().items():
             if self._validated_data.get(field.source) is None:
                 continue
@@ -521,18 +523,13 @@ class RelatedSaveMixin(serializers.Serializer):
             if isinstance(field, serializers.ListSerializer):
                 field = field.child
             if isinstance(field, serializers.ModelSerializer):
-                self._validated_data.pop(source)
+                related_objects.append(self._validated_data.pop(source))
+        return related_objects
 
-    def _save_reverse_relations(self):
+    def _save_reverse_relations(self, related_objects):
         # Remove related fields from validated data for future manipulations
-        for field_name, (field, related_field) in self._get_reverse_fields().items():
-            if self._validated_data.get(field.source) is None:
-                continue
-            origin = field
-            if isinstance(field, serializers.ListSerializer):
-                field = field.child
-            if isinstance(field, serializers.ModelSerializer):
-                origin.save()
+        for related in related_objects:
+            related.save()
 
 
 class GetOrCreateListSerializer(serializers.ListSerializer):
