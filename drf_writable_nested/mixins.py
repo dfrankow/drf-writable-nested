@@ -509,11 +509,11 @@ class RelatedSaveMixin(serializers.Serializer):
         for field_name, (field, related_field) in self._get_reverse_fields().items():
             if self._validated_data.get(field.source) is None:
                 continue
-            source = field.source
-            if isinstance(field, serializers.ListSerializer):
-                field = field.child
-            if isinstance(field, serializers.ModelSerializer):
-                related_objects.append((field, related_field, self._validated_data.pop(source)))
+            serializer = field
+            if isinstance(serializer, serializers.ListSerializer):
+                serializer = serializer.child
+            if isinstance(serializer, serializers.ModelSerializer):
+                related_objects.append((field, related_field, self._validated_data.pop(field.source)))
         return related_objects
 
     def _save_reverse_relations(self, related_objects):
