@@ -417,12 +417,10 @@ class RelatedSaveMixin(serializers.Serializer):
         return super().to_internal_value(data)
 
     def _make_reverse_relations_valid(self, data):
-        """For reverse relations, we must either (1) inject the PK of the provided instance or (2) make the reverse
-        field optional since we haven't saved the base object."""
+        """Make the reverse field optional since we may not have a key for the base object."""
         for field_name, (field, related_field) in self._get_reverse_fields().items():
             if data.get(field.source) is None:
                 continue
-            # make the reverse field optional (until we actually have a PK)
             if isinstance(field, serializers.ListSerializer):
                 field = field.child
             if isinstance(field, serializers.ModelSerializer):
@@ -444,7 +442,7 @@ class RelatedSaveMixin(serializers.Serializer):
             # prevent recursion when we save a reverse (which tries to save self as a direct)
             return
         # Create or update direct relations (foreign key, one-to-one)
-        reverse_relations = self._extract_reverse_relations()
+        reverse_relations = self._extract_reverse_relations(kwargs)
         self._save_direct_relations()
         super().save(**kwargs)
         self._is_saved = True
@@ -507,7 +505,7 @@ class RelatedSaveMixin(serializers.Serializer):
 
             self._validated_data[field_name] = field.save()
 
-    def _extract_reverse_relations(self):
+    def _extract_reverse_relations(self, kwargs):
         """Removes revere relations from _validated_data to avoid FK integrity issues"""
         # Remove related fields from validated data for future manipulations
         related_objects = []
@@ -518,12 +516,17 @@ class RelatedSaveMixin(serializers.Serializer):
             if isinstance(serializer, serializers.ListSerializer):
                 serializer = serializer.child
             if isinstance(serializer, serializers.ModelSerializer):
-                related_objects.append((field, related_field, self._validated_data.pop(field.source)))
+                related_objects.append((
+                    field,
+                    related_field,
+                    self._validated_data.pop(field.source),
+                    kwargs.pop(field_name, {}),
+                ))
         return related_objects
 
     def _save_reverse_relations(self, related_objects):
-        # Remove related fields from validated data for future manipulations
-        for field, related_field, data in related_objects:
+        """Inject the current object as the FK in the reverse related objects and save them"""
+        for field, related_field, data, kwargs in related_objects:
             # inject the PK from the instance
             if isinstance(field, serializers.ListSerializer):
                 for obj in data:
@@ -532,7 +535,7 @@ class RelatedSaveMixin(serializers.Serializer):
                 data[related_field.name] = self.instance
             else:
                 raise Exception("unexpected serializer type")
-            field.save()
+            field.save(**kwargs)
 
 
 class GetOrCreateListSerializer(serializers.ListSerializer):
@@ -556,6 +559,8 @@ class GetOrCreateListSerializer(serializers.ListSerializer):
         for item in self.validated_data:
             # delegate save behavior to child serializer
             self.child._validated_data = item
+            # force the nested fields to update
+            self.run_validation(self.initial_data)
             new_values.append(self.child.save(**kwargs))
             delattr(self.child, '_validated_data')
 
@@ -576,6 +581,7 @@ class GetOrCreateNestedSerializerMixin(RelatedSaveMixin):
 
     @classmethod
     def many_init(cls, *args, **kwargs):
+        super().save()
         # inject the default into list_serializer_class (if not present)
         meta = getattr(cls, 'Meta', None)
         if meta is None:
