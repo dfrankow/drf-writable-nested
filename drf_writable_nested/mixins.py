@@ -503,6 +503,8 @@ class RelatedSaveMixin(serializers.Serializer):
                 if not direct:
                     continue
 
+            # reinject validated_data
+            field._validated_data = self._validated_data[field_name]
             self._validated_data[field_name] = field.save(**kwargs.pop(field_name, {}))
 
     def _extract_reverse_relations(self, kwargs):
@@ -535,6 +537,9 @@ class RelatedSaveMixin(serializers.Serializer):
                 data[related_field.name] = self.instance
             else:
                 raise Exception("unexpected serializer type")
+
+            # reinject validated_data
+            field._validated_data = data
             field.save(**kwargs)
 
 
@@ -556,11 +561,11 @@ class GetOrCreateListSerializer(serializers.ListSerializer):
 
         new_values = []
 
-        for item in self.validated_data:
+        for item in self._validated_data:
             # integrate save kwargs
-            item.update(**kwargs)
+            self.child._validated_data = item
             # since we reuse the serializer, we need to re-inject the new _validated_data using save kwargs
-            new_values.append(self.child.save(**item))
+            new_values.append(self.child.save(**kwargs))
 
         return new_values
 
@@ -612,10 +617,10 @@ class GetOrCreateNestedSerializerMixin(RelatedSaveMixin):
         """A nested serializer is treated like a Field so `is_valid` will not be called and `_validated_data` not set."""
         # ensure Unique and UniqueTogether don't collide with a DB match
         validators = self.remove_validation_unique()
-        self._validated_data = super().run_validation(data)
+        validated_data = super().run_validation(data)
         # restore Unique or UniqueTogether
         self.restore_validation_unique(validators)
-        return self._validated_data
+        return self.validated_data
 
     def remove_validation_unique(self):
         """
