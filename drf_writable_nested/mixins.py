@@ -559,7 +559,7 @@ class GetOrCreateListSerializer(serializers.ListSerializer):
         for item in self.validated_data:
             # integrate save kwargs
             item.update(**kwargs)
-            # delegate save behavior to child serializer
+            # since we reuse the serializer, we need to re-inject the new _validated_data using save kwargs
             new_values.append(self.child.save(item))
             delattr(self.child, '_validated_data')
 
@@ -580,7 +580,6 @@ class GetOrCreateNestedSerializerMixin(RelatedSaveMixin):
 
     @classmethod
     def many_init(cls, *args, **kwargs):
-        super().save()
         # inject the default into list_serializer_class (if not present)
         meta = getattr(cls, 'Meta', None)
         if meta is None:
