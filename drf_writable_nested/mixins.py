@@ -443,7 +443,7 @@ class RelatedSaveMixin(serializers.Serializer):
             return
         # Create or update direct relations (foreign key, one-to-one)
         reverse_relations = self._extract_reverse_relations(kwargs)
-        self._save_direct_relations()
+        self._save_direct_relations(kwargs)
         super().save(**kwargs)
         self._is_saved = True
         self._save_reverse_relations(reverse_relations)
@@ -557,11 +557,10 @@ class GetOrCreateListSerializer(serializers.ListSerializer):
         new_values = []
 
         for item in self.validated_data:
+            # integrate save kwargs
+            item.update(**kwargs)
             # delegate save behavior to child serializer
-            self.child._validated_data = item
-            # force the nested fields to update
-            self.run_validation(self.initial_data)
-            new_values.append(self.child.save(**kwargs))
+            new_values.append(self.child.save(item))
             delattr(self.child, '_validated_data')
 
         return new_values
