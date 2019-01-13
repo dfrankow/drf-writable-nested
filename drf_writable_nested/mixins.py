@@ -561,7 +561,6 @@ class GetOrCreateListSerializer(serializers.ListSerializer):
             item.update(**kwargs)
             # since we reuse the serializer, we need to re-inject the new _validated_data using save kwargs
             new_values.append(self.child.save(**item))
-            delattr(self.child, '_validated_data')
 
         return new_values
 
