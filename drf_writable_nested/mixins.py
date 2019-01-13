@@ -410,6 +410,7 @@ class UniqueFieldsMixin(serializers.ModelSerializer):
 
 
 class RelatedSaveMixin(serializers.Serializer):
+    _is_saved = False
 
     def to_internal_value(self, data):
         self._make_reverse_relations_valid(data)
@@ -439,10 +440,14 @@ class RelatedSaveMixin(serializers.Serializer):
 
     def save(self, **kwargs):
         """We already converted the inputs into a model so we need to save that model"""
+        if self._is_saved:
+            # prevent recursion when we save a reverse (which tries to save self as a direct)
+            return
         # Create or update direct relations (foreign key, one-to-one)
         reverse_relations = self._extract_reverse_relations()
         self._save_direct_relations()
         super().save(**kwargs)
+        self._is_saved = True
         self._save_reverse_relations(reverse_relations)
         return self.instance
 
