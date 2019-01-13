@@ -485,7 +485,7 @@ class RelatedSaveMixin(serializers.Serializer):
             return related_field.field, False
         return related_field, True
 
-    def _save_direct_relations(self):
+    def _save_direct_relations(self, kwargs):
         """Save direct relations so related objects have FKs when committing the base instance"""
         for field_name, field in self.fields.items():
             if field.read_only:
@@ -503,7 +503,7 @@ class RelatedSaveMixin(serializers.Serializer):
                 if not direct:
                     continue
 
-            self._validated_data[field_name] = field.save()
+            self._validated_data[field_name] = field.save(**kwargs.pop(field_name, {}))
 
     def _extract_reverse_relations(self, kwargs):
         """Removes revere relations from _validated_data to avoid FK integrity issues"""
