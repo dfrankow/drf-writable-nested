@@ -657,8 +657,8 @@ class GetOrCreateNestedSerializerMixin(RelatedSaveMixin):
             self._validated_data[k] = v
 
         # Create or update direct relations (foreign key, one-to-one)
-        related_objects = self._extract_reverse_relations()
-        self._save_direct_relations()
+        related_objects = self._extract_reverse_relations(kwargs)
+        self._save_direct_relations(kwargs)
 
         # TODO: move to a specialized class (easier to subclass)
         try:
