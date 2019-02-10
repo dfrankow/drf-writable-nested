@@ -526,15 +526,15 @@ class RelatedSaveMixin(serializers.Serializer):
                 ))
         return related_objects
 
-    def _save_reverse_relations(self, related_objects):
+    def _save_reverse_relations(self, related_objects, instance):
         """Inject the current object as the FK in the reverse related objects and save them"""
         for field, related_field, data, kwargs in related_objects:
             # inject the PK from the instance
             if isinstance(field, serializers.ListSerializer):
                 for obj in data:
-                    obj[related_field.name] = self.instance
+                    obj[related_field.name] = instance
             elif isinstance(field, serializers.ModelSerializer):
-                data[related_field.name] = self.instance
+                data[related_field.name] = instance
             else:
                 raise Exception("unexpected serializer type")
 
@@ -683,5 +683,5 @@ class GetOrCreateNestedSerializerMixin(RelatedSaveMixin):
             self.fail('incorrect_type', data_type=type(self._validated_data).__name__)
         match.save()
 
-        self._save_reverse_relations(related_objects)
+        self._save_reverse_relations(related_objects, instance=match)
         return match
