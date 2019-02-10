@@ -444,10 +444,10 @@ class RelatedSaveMixin(serializers.Serializer):
         # Create or update direct relations (foreign key, one-to-one)
         reverse_relations = self._extract_reverse_relations(kwargs)
         self._save_direct_relations(kwargs)
-        super().save(**kwargs)
+        instance = super().save(**kwargs)
         self._is_saved = True
-        self._save_reverse_relations(reverse_relations)
-        return self.instance
+        self._save_reverse_relations(reverse_relations, instance=instance)
+        return instance
 
     def _get_reverse_fields(self):
         reverse_fields = OrderedDict()
