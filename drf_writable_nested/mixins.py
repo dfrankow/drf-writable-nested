@@ -606,9 +606,9 @@ class GetOrCreateNestedSerializerMixin(RelatedSaveMixin):
         assert self.queryset is not None, \
             "GetOrCreateMixin requires a `queryset` on the Field or a `queryset` kwarg"
         self.match_on = kwargs.pop('match_on', self.DEFAULT_MATCH_ON)
-        assert self.match_on == '__all__' or isinstance(self.match_on, (list, set)), \
+        assert self.match_on == '__all__' or isinstance(self.match_on, (tuple, list, set)), \
             "match_on only accepts as Collection of strings or the special value __all__"
-        if isinstance(self.match_on, (list, set)):
+        if isinstance(self.match_on, (tuple, list, set)):
             for match in self.match_on:
                 assert isinstance(match, str), "match_on collection can only contain strings"
         super(GetOrCreateNestedSerializerMixin, self).__init__(*args, **kwargs)
